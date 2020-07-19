@@ -1,0 +1,145 @@
+<?xml version="1.0" ?><simulation xmds-version="2">
+	<name>raman</name>
+	<author>Aaron</author>
+	<description> 2 level Raman memory simulation. Solves the 2-level Maxwell-Bloch equations for an ensemble under
+	classical control fields and a weak probes that are counter propagating</description>
+<features>
+	<benchmark/>
+	<bing/>
+	<globals>
+		<![CDATA[
+		const double pi = M_PI;
+		double agamma = pi; 		/* excited state coherence decay (half the excited state linewidth, set to pi means all frequencies in terms of linewidth */
+		complex delta_p;  		/* one-photon detuning*/
+		complex delta_m;
+		real omega_p;
+		real omega_m;
+
+		real om_p;
+		real om_m;
+		complex stark;
+		complex gamma_scat;
+
+		double gaussian( double x, double w ) { return exp( -2 * pow(x,2) / pow(w,2) ); }
+
+		double sq_d( double x) { return x*x;}
+		real sq_r( real x) { return x*x;}
+		complex sq_c( complex x) { return x*x;}
+
+        real controlswitch_p(double time){
+        if (time > 8.0) {return 1.0;}
+        else {return 0.0;}
+        }
+
+        real controlswitch_m (double time){
+if (time < 2.40){ return 1.0; }        else {return 0.0;}
+        }
+		]]>
+
+	</globals>
+	<arguments append_args_to_output_filename="no">
+		<argument default_value="2" name="tin" type="real"/>
+		<argument default_value="1" name="pulsewidth" type="real"/>
+
+		<argument default_value="2.8294071920137633" name="gtin" type="real"/>
+		<argument default_value="0.6726244132021377" name="gpulsewidth_p" type="real"/>
+		<argument default_value="0.6726244132021377" name="gpulsewidth_m" type="real"/>
+
+		<argument default_value="5.983093518595007" name="omega_in_p" type="real"/>
+		<argument default_value="0.9632475738422263" name="omega_in_m" type="real"/>
+
+		<argument default_value="-33" name="delta_p_in" type="real"/>
+		<argument default_value="33" name="delta_m_in" type="real"/>
+		<argument default_value="460" name="od" type="real"/>
+
+		<![CDATA[
+		omega_p = 2*pi*omega_in_p;
+		omega_m = 2*pi*omega_in_m;
+		delta_p = ((2*pi*delta_p_in)*(2*pi*delta_p_in) + agamma*agamma) / (2*pi*delta_p_in + i*agamma);
+		delta_m = ((2*pi*delta_m_in)*(2*pi*delta_m_in) + agamma*agamma) / (2*pi*delta_m_in + i*agamma);
+		]]>
+	</arguments>
+</features>
+<geometry>
+	<propagation_dimension>t</propagation_dimension>
+		<transverse_dimensions>
+		<dimension domain="(0, 1)" lattice="300" name="z"/>
+		</transverse_dimensions>
+</geometry>
+
+<vector initial_space="z" name="spinwave" type="complex">
+	<components>S</components>
+</vector>
+
+<vector initial_space="z" name="probe_p" type="complex">
+	<components>Ep</components>
+</vector>
+
+<vector initial_space="z" name="probe_m" type="complex">
+	<components>Em</components>
+</vector>
+
+<sequence>
+	<integrate algorithm="RK4" interval="14" steps="800" tolerance="1.0e-6">
+	<samples>800</samples>
+	
+	<operators>   
+		<operator kind="functions">
+            <![CDATA[
+            /*om_p = omega_p*(tanh(-10*(t - 2.4))+1)/2;
+            om_m = omega_m*(tanh(10*(t - 8.0))+1)/2;*/
+
+            om_p = omega_p*gaussian(t-gtin, gpulsewidth_p);
+            om_m = omega_m*gaussian(t-12.0, gpulsewidth_m);
+
+            stark = (delta_p*sq_r(abs(om_p)) / (sq_c(delta_p) + sq_d(agamma))) + (delta_m*sq_r(abs(om_m)) / (sq_c(delta_m) + sq_d(agamma)));
+            gamma_scat = (agamma*sq_r(abs(om_p)) / (sq_c(delta_p) + sq_d(agamma))) + (agamma*sq_r(abs(om_m)) / (sq_c(delta_m) + sq_d(agamma)));
+            ]]>
+        </operator>
+
+        <operator algorithm="RK4" kind="cross_propagation" propagation_dimension="z">
+            <integration_vectors> probe_p </integration_vectors>
+            <dependencies>spinwave</dependencies>
+            <boundary_condition kind="left">
+                <![CDATA[
+                Ep = gaussian(t-tin,pulsewidth);
+                ]]>
+            </boundary_condition>
+            <![CDATA[
+            dEp_dz = (i*od*agamma*Ep / delta_p) + (i*sqrt(od)*agamma*om_p*S / delta_p);
+            ]]>
+        </operator>
+
+        <operator algorithm="RK4" kind="cross_propagation" propagation_dimension="z">
+            <integration_vectors> probe_m </integration_vectors>
+            <dependencies>spinwave</dependencies>
+            <boundary_condition kind="right">
+                Em = 0;
+            </boundary_condition>
+            <![CDATA[
+            dEm_dz = -(i*od*agamma*Em / delta_m) - (i*sqrt(od)*agamma*om_m*S / delta_m);
+            ]]>
+        </operator>
+
+			<integration_vectors>spinwave</integration_vectors>
+				<![CDATA[
+				dS_dt = (i*sqrt(od)*agamma*om_p*Ep / delta_p) + (i*sqrt(od)*agamma*om_m*Em / delta_m) - (gamma_scat + i*stark)*S;
+			]]>
+	</operators>
+	</integrate>
+</sequence>
+
+<output filename="raman" format="hdf5">
+	<group>
+	<sampling basis="z" initial_sample="yes">
+		<moments>SR SI EpR EpI EmR EmI</moments>
+		<dependencies>probe_p probe_m spinwave</dependencies>
+		<![CDATA[
+		_SAMPLE_COMPLEX(S);
+		_SAMPLE_COMPLEX(Ep);
+		_SAMPLE_COMPLEX(Em);
+		]]>
+	</sampling>
+	</group>
+</output>
+</simulation>
